@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { updateProductAction } from "@/app/actions";
 import { hasSupabaseEnv } from "@/lib/env";
+import { generateCsrfToken } from "@/lib/csrf";
 import { getCurrentProfile, getOwnerProductById } from "@/lib/store";
 
 export default async function EditProductPage({
@@ -15,11 +16,10 @@ export default async function EditProductPage({
       <main className="mx-auto max-w-3xl px-6 py-10">
         <section className="rounded-[2rem] bg-white p-8 shadow-sm">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Edit is available after Supabase setup
+            Supabase 設定後に編集可能になります
           </h1>
           <p className="mt-4 text-slate-600">
-            Configure Supabase env vars and sign in as an owner to update
-            products.
+            Supabase の環境変数を設定し、管理者または出品者でログインしてください。
           </p>
         </section>
       </main>
@@ -28,12 +28,13 @@ export default async function EditProductPage({
 
   const profile = await getCurrentProfile();
 
-  if (!profile || profile.role !== "owner") {
+  if (!profile || !["owner", "seller"].includes(profile.role)) {
     notFound();
   }
 
   const { id } = await params;
   const product = await getOwnerProductById(profile.id, id);
+  const csrfToken = await generateCsrfToken();
 
   if (!product) {
     notFound();
@@ -45,21 +46,22 @@ export default async function EditProductPage({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-slate-400">
-              Owner tools
+              出品者ツール
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-              Edit product
+              商品を編集
             </h1>
           </div>
           <Link
             href="/admin"
             className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-700"
           >
-            Back to admin
+            管理画面に戻る
           </Link>
         </div>
 
         <form action={updateProductAction} className="mt-8 space-y-4">
+          <input type="hidden" name="csrf_token" value={csrfToken} />
           <input type="hidden" name="productId" value={product.id} />
 
           <input
@@ -110,14 +112,14 @@ export default async function EditProductPage({
               name="isActive"
               defaultChecked={product.is_active}
             />
-            Visible on storefront
+            ストアで表示する
           </label>
 
           <button
             type="submit"
             className="inline-flex rounded-full bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
           >
-            Update product
+            更新する
           </button>
         </form>
       </section>

@@ -1,8 +1,8 @@
 import Link from "next/link";
 
 import { createProductAction, deleteProductAction } from "@/app/actions";
-import { demoProducts } from "@/lib/mock-data";
 import { hasSupabaseEnv } from "@/lib/env";
+import { generateCsrfToken } from "@/lib/csrf";
 import { getCurrentProfile, getOwnerProducts } from "@/lib/store";
 
 export default async function AdminPage() {
@@ -13,33 +13,14 @@ export default async function AdminPage() {
       <main className="mx-auto max-w-6xl px-6 py-10">
         <section className="rounded-[2rem] bg-white p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.3em] text-slate-400">
-            Admin
+            管理画面
           </p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-900">
-            Owner admin is ready for Supabase
+            Supabase 設定後に利用可能
           </h1>
           <p className="mt-4 max-w-2xl text-slate-600">
-            This page becomes writable once Supabase env vars are configured and
-            you log in as an `owner`. Until then, sample products are shown
-            below so the layout stays demoable.
+            Supabase の環境変数を設定し、管理者または出品者でログインすると編集できます。
           </p>
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {demoProducts.map((product) => (
-              <div
-                key={product.id}
-                className="rounded-3xl border border-slate-200 p-4"
-              >
-                <p className="text-sm text-slate-500">{product.category}</p>
-                <h2 className="mt-2 text-lg font-semibold text-slate-900">
-                  {product.name}
-                </h2>
-                <p className="mt-2 text-sm text-slate-600">
-                  ¥{product.price.toLocaleString("ja-JP")}
-                </p>
-              </div>
-            ))}
-          </div>
         </section>
       </main>
     );
@@ -50,26 +31,27 @@ export default async function AdminPage() {
       <main className="mx-auto max-w-3xl px-6 py-10">
         <section className="rounded-[2rem] bg-white p-8 shadow-sm">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Login required
+            ログインが必要です
           </h1>
           <p className="mt-4 text-slate-600">
-            Sign in with an owner account to manage products.
+            管理者または出品者アカウントでログインして商品を管理してください。
           </p>
         </section>
       </main>
     );
   }
 
-  if (profile.role !== "owner") {
+  const csrfToken = await generateCsrfToken();
+
+  if (!["owner", "seller"].includes(profile.role)) {
     return (
       <main className="mx-auto max-w-3xl px-6 py-10">
         <section className="rounded-[2rem] bg-white p-8 shadow-sm">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Owner access only
+            管理画面へのアクセス権限がありません
           </h1>
           <p className="mt-4 text-slate-600">
-            Your current role is `{profile.role}`. Create or update a profile
-            with role `owner` to open the admin product form.
+            現在のロールは `{profile.role}` です。管理者または出品者でプロフィールを更新してください。
           </p>
         </section>
       </main>
@@ -83,33 +65,34 @@ export default async function AdminPage() {
       <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
         <section className="rounded-[2rem] bg-white p-6 shadow-sm">
           <p className="text-sm uppercase tracking-[0.3em] text-slate-400">
-            Owner tools
+            出品者ツール
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-            Add a new product
+            新規商品を追加
           </h1>
 
           <form action={createProductAction} className="mt-6 space-y-4">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
             <input
               name="name"
-              placeholder="Product name"
+              placeholder="商品名"
               required
               className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
             />
             <textarea
               name="description"
-              placeholder="Description"
+              placeholder="説明"
               rows={4}
               className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
             />
             <input
               name="category"
-              placeholder="Category"
+              placeholder="カテゴリ"
               className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
             />
             <input
               name="imageUrl"
-              placeholder="Image URL (optional)"
+              placeholder="画像URL（任意）"
               className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
             />
             <div className="grid gap-4 sm:grid-cols-2">
@@ -117,7 +100,7 @@ export default async function AdminPage() {
                 type="number"
                 name="price"
                 min="0"
-                placeholder="Price"
+                placeholder="価格"
                 required
                 className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
               />
@@ -125,7 +108,7 @@ export default async function AdminPage() {
                 type="number"
                 name="stock"
                 min="0"
-                placeholder="Stock"
+                placeholder="在庫数"
                 required
                 className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
               />
@@ -134,23 +117,23 @@ export default async function AdminPage() {
               type="submit"
               className="inline-flex rounded-full bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
             >
-              Save product
+              商品を保存
             </button>
           </form>
         </section>
 
         <section className="rounded-[2rem] bg-white p-6 shadow-sm">
           <p className="text-sm uppercase tracking-[0.3em] text-slate-400">
-            Current catalog
+            登録商品
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-            Your products
+            あなたの商品
           </h2>
 
           <div className="mt-6 space-y-4">
             {products.length === 0 ? (
               <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                No products yet. Add your first item from the form.
+                商品がありません。上のフォームから最初の商品を追加してください。
               </p>
             ) : (
               products.map((product) => (
@@ -165,24 +148,25 @@ export default async function AdminPage() {
                         {product.name}
                       </h3>
                       <p className="mt-2 text-sm text-slate-600">
-                        ¥{product.price.toLocaleString("ja-JP")} / stock{" "}
+                        ¥{product.price.toLocaleString("ja-JP")} / 在庫{" "}
                         {product.stock}
                       </p>
                     </div>
                     <form action={deleteProductAction}>
+                      <input type="hidden" name="csrf_token" value={csrfToken} />
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/products/${product.id}/edit`}
                           className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-700"
                         >
-                          Edit
+                          編集
                         </Link>
                         <input type="hidden" name="productId" value={product.id} />
                         <button
                           type="submit"
                           className="rounded-full border border-rose-200 px-4 py-2 text-sm text-rose-600"
                         >
-                          Delete
+                          削除
                         </button>
                       </div>
                     </form>

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Affina Shop",
-  description: "A lightweight EC starter built with Next.js and Supabase.",
+  description: "アフィリエイト特化型のECサイト。出品者とユーザーをつなぐプラットフォーム。",
 };
 
 export default function RootLayout({

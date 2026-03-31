@@ -4,11 +4,18 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import {
+  AFFILIATE_CAMPAIGN_COOKIE,
+  AFFILIATE_REF_COOKIE,
+} from "@/lib/affiliate";
+import { notifyAffinaConversion } from "@/lib/affina-notify";
+import { validateCsrfToken } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/server";
 import {
   CART_COOKIE,
   getCartSummary,
   getCookieCartEntries,
+  getProductById,
   mergeCartEntry,
   removeCartEntry,
   replaceCartEntry,
@@ -42,6 +49,7 @@ async function clearCookieCart() {
 }
 
 export async function signUpAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (!supabase) {
@@ -51,7 +59,9 @@ export async function signUpAction(formData: FormData) {
   const email = getString(formData, "email");
   const password = getString(formData, "password");
   const displayName = getString(formData, "displayName");
-  const role = getString(formData, "role") === "owner" ? "owner" : "user";
+  const roleRaw = getString(formData, "role");
+  const role =
+    roleRaw === "owner" ? "owner" : roleRaw === "seller" ? "seller" : "user";
 
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -81,6 +91,7 @@ export async function signUpAction(formData: FormData) {
 }
 
 export async function signInAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (!supabase) {
@@ -102,7 +113,8 @@ export async function signInAction(formData: FormData) {
   redirect("/");
 }
 
-export async function signOutAction() {
+export async function signOutAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (supabase) {
@@ -113,9 +125,16 @@ export async function signOutAction() {
 }
 
 export async function addToCartAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const productId = getString(formData, "productId");
   const quantity = Number(formData.get("quantity") ?? 1);
   const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+  const product = await getProductById(productId);
+
+  if (!product || product.stock <= 0) {
+    redirect(`/products/${productId}?error=out_of_stock`);
+  }
+
   const supabase = await createClient();
 
   if (supabase) {
@@ -131,10 +150,15 @@ export async function addToCartAction(formData: FormData) {
         .eq("product_id", productId)
         .maybeSingle();
 
+      const newQuantity = existing ? existing.quantity + safeQuantity : safeQuantity;
+      if (newQuantity > product.stock) {
+        redirect(`/products/${productId}?error=insufficient_stock`);
+      }
+
       if (existing) {
         await supabase
           .from("cart_items")
-          .update({ quantity: existing.quantity + safeQuantity })
+          .update({ quantity: newQuantity })
           .eq("id", existing.id);
       } else {
         await supabase.from("cart_items").insert({
@@ -152,8 +176,13 @@ export async function addToCartAction(formData: FormData) {
   }
 
   const entries = await getCookieCartEntries();
-  const next = mergeCartEntry(entries, productId, safeQuantity);
+  const currentQty = entries.find((e) => e.productId === productId)?.quantity ?? 0;
+  const newQuantity = currentQty + safeQuantity;
+  if (newQuantity > product.stock) {
+    redirect(`/products/${productId}?error=insufficient_stock`);
+  }
 
+  const next = mergeCartEntry(entries, productId, safeQuantity);
   await setCookieCart(serializeCart(next));
   revalidatePath("/");
   revalidatePath("/cart");
@@ -161,9 +190,16 @@ export async function addToCartAction(formData: FormData) {
 }
 
 export async function updateCartItemAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const productId = getString(formData, "productId");
   const quantity = Number(formData.get("quantity") ?? 1);
   const safeQuantity = Number.isFinite(quantity) ? Math.max(0, quantity) : 1;
+  const product = await getProductById(productId);
+
+  if (safeQuantity > 0 && product && safeQuantity > product.stock) {
+    redirect("/cart?error=insufficient_stock");
+  }
+
   const supabase = await createClient();
 
   if (supabase) {
@@ -200,6 +236,7 @@ export async function updateCartItemAction(formData: FormData) {
 }
 
 export async function removeCartItemAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const productId = getString(formData, "productId");
   const supabase = await createClient();
 
@@ -229,6 +266,7 @@ export async function removeCartItemAction(formData: FormData) {
 }
 
 export async function checkoutAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const fullName = getString(formData, "fullName");
   const address = getString(formData, "address");
   const postalCode = getString(formData, "postalCode");
@@ -237,6 +275,19 @@ export async function checkoutAction(formData: FormData) {
   if (summary.lines.length === 0) {
     redirect("/cart");
   }
+
+  for (const line of summary.lines) {
+    const product = await getProductById(line.product.id);
+    if (!product || product.stock < line.quantity) {
+      redirect("/cart?error=insufficient_stock");
+    }
+  }
+
+  const cookieStore = await cookies();
+  const affiliateCode =
+    cookieStore.get(AFFILIATE_REF_COOKIE)?.value?.trim() || null;
+  const affiliateCampaignId =
+    cookieStore.get(AFFILIATE_CAMPAIGN_COOKIE)?.value?.trim() || null;
 
   const supabase = await createClient();
 
@@ -252,6 +303,8 @@ export async function checkoutAction(formData: FormData) {
           user_id: user.id,
           status: "pending",
           total_amount: summary.total,
+          affiliate_code: affiliateCode,
+          affiliate_campaign_id: affiliateCampaignId,
           shipping_address: {
             full_name: fullName,
             address,
@@ -271,6 +324,28 @@ export async function checkoutAction(formData: FormData) {
           })),
         );
 
+        for (const line of summary.lines) {
+          const fresh = await getProductById(line.product.id);
+          if (fresh) {
+            await supabase
+              .from("products")
+              .update({ stock: fresh.stock - line.quantity })
+              .eq("id", line.product.id);
+          }
+        }
+
+        await notifyAffinaConversion({
+          orderId: order.id,
+          affiliateCode: affiliateCode ?? "",
+          campaignId: affiliateCampaignId,
+          totalAmount: summary.total,
+          items: summary.lines.map((line) => ({
+            product_id: line.product.id,
+            quantity: line.quantity,
+            price: line.product.price,
+          })),
+        });
+
         await supabase.from("cart_items").delete().eq("user_id", user.id);
         await clearCookieCart();
         revalidatePath("/cart");
@@ -285,6 +360,7 @@ export async function checkoutAction(formData: FormData) {
 }
 
 export async function createProductAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (!supabase) {
@@ -323,6 +399,7 @@ export async function createProductAction(formData: FormData) {
 }
 
 export async function updateProductAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (!supabase) {
@@ -368,6 +445,7 @@ export async function updateProductAction(formData: FormData) {
 }
 
 export async function deleteProductAction(formData: FormData) {
+  await validateCsrfToken(formData);
   const supabase = await createClient();
 
   if (!supabase) {

@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 
-import { demoProducts } from "@/lib/mock-data";
 import { createClient } from "@/lib/supabase/server";
 import { CartEntry, CartLine, ProductRecord, ProfileRecord } from "@/lib/types";
 
@@ -46,7 +45,7 @@ export async function getProducts() {
   const supabase = await createClient();
 
   if (!supabase) {
-    return demoProducts;
+    return [];
   }
 
   const { data, error } = await supabase
@@ -57,8 +56,8 @@ export async function getProducts() {
     .eq("is_active", true)
     .order("created_at", { ascending: false });
 
-  if (error || !data || data.length === 0) {
-    return demoProducts;
+  if (error || !data) {
+    return [];
   }
 
   return data as ProductRecord[];
@@ -68,7 +67,7 @@ export async function getProductById(id: string) {
   const supabase = await createClient();
 
   if (!supabase) {
-    return demoProducts.find((product) => product.id === id) ?? null;
+    return null;
   }
 
   const { data, error } = await supabase
@@ -79,8 +78,15 @@ export async function getProductById(id: string) {
     .eq("id", id)
     .maybeSingle();
 
-  if (error || !data) {
-    return demoProducts.find((product) => product.id === id) ?? null;
+  if (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[getProductById]", id, error.message, error.code);
+    }
+    return null;
+  }
+
+  if (!data) {
+    return null;
   }
 
   return data as ProductRecord;
